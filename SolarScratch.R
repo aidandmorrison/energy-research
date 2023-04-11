@@ -55,9 +55,11 @@ ggplot(data = world) +
 
 #------ individual visuals and summar ----
 df <- read_csv("../AEMO_data/solar/Winton_SAT_RefYear3012.csv")
+df <- read_csv("../AEMO_data/solar/Gunnedah_SAT_RefYear3012.csv")
+df <- read_csv("../AEMO_data/solar/REZ_Q1_Far_North_QLD_CST_RefYear3012.csv")
 skim(df)
 plot_df <- df %>%
-  filter(Year < 2034,
+  filter(Year < 2035,
          Year > 2023) %>%
   # filter(Year %in% 2023) %>%
   # filter(Month == 12) %>%

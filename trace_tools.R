@@ -163,7 +163,8 @@ rescale_for_tod_month <- function(long_df){
     mutate(data = map(data, ~mutate_at(.x, 3:ncol(.x), scale))) %>%
     unnest(cols = c(data)) %>% 
     ungroup() %>% 
-    drop_na()
+    drop_na() %>% 
+    select(-Year, -Month, -Day, -half_hour)
   
   return(rescaled_data)
 }
@@ -171,6 +172,7 @@ rescale_for_tod_month <- function(long_df){
 
 get_day_summ <- function(long_df){
   day_summ <- long_df %>% 
+    arrange(location, Year, Month, Day) %>% 
     group_by(location, Year, Month, Day) %>% 
     summarise(value = sum(value))
   return(day_summ)
@@ -178,10 +180,9 @@ get_day_summ <- function(long_df){
 
 create_nday_summ <- function(day_summ, n){
   nday_summ <- day_summ %>%
-    arrange(location, Year, Month, Day) %>% # Ensure data is sorted by date
     group_by(location) %>%
-    mutate(NDayPeriod = (row_number() - 1) %/% n) %>% # Create a new column for n-day periods
-    group_by(location, NDayPeriod) %>% # Group by the new column
+    mutate(Period = (row_number() - 1) %/% n) %>% # Create a new column for n-day periods
+    group_by(location, Period) %>% # Group by the new column
     summarise(value = mean(value))
   return(nday_summ)
 }
@@ -189,7 +190,6 @@ create_nday_summ <- function(day_summ, n){
 raw_correlation_plot <- function(wide_df){
   
   M <- wide_df %>%
-    select(-Year, -Month, -Day, -half_hour) %>%
     cor()
   
   lower_triangle <- M[lower.tri(M)]
@@ -213,7 +213,7 @@ plot_correlation <- function(day_summ, n) {
     pivot_wider(names_from = location, values_from = value) %>% 
     ungroup()
   
-  nD <- corr_plot_nday %>% select(-NDayPeriod) %>% cor()
+  nD <- corr_plot_nday %>% select(-Period) %>% cor()
   
   lower_triangle <- nD[lower.tri(nD)]
   min_corr <- min(lower_triangle)
@@ -320,4 +320,81 @@ haversine_distance <- function(lat1, lon1, lat2, lon2) {
   c <- 2 * atan2(sqrt(a), sqrt(1 - a))
   d <- R * c
   return(d)
+}
+
+get_correlation_distances <- function(corr_matrix, locations_df){
+  location_coords <- cascade_results1 %>% 
+    select(location, lat, long) 
+  
+  distance_matrix <- expand.grid(location1 = location_coords$location,
+                                 location2 = location_coords$location) %>%
+    left_join(location_coords, by = c("location1" = "location")) %>%
+    rename(lat1 = lat, lon1 = long) %>%
+    left_join(location_coords, by = c("location2" = "location")) %>%
+    rename(lat2 = lat, lon2 = long) %>%
+    mutate(distance = haversine_distance(lat1, lon1, lat2, lon2)) %>% 
+    unique() %>% 
+    drop_na()
+  
+  # Create a data frame with correlations and distances between each location pair
+  correlations_distances <- data.frame(
+    location1 = rownames(corr_matrix)[row(corr_matrix)],
+    location2 = colnames(corr_matrix)[col(corr_matrix)],
+    correlation = c(corr_matrix)
+  ) %>%
+    filter(location1 != location2) %>%
+    left_join(distance_matrix, by = c("location1", "location2")) %>% 
+    drop_na()
+  
+  return(correlations_distances)
+}
+
+plot_correlation_vs_distance <- function(correlation_distance){
+  correlations_distances <- correlations_distances %>%
+    mutate(ns_sep = abs(lat1 - lat2),
+           ew_sep = abs(lon1 - lon2))
+  
+  # Calculate min and max values for ns_sep and ew_sep
+  min_ns_sep <- min(correlations_distances$ns_sep, na.rm = TRUE)
+  max_ns_sep <- max(correlations_distances$ns_sep, na.rm = TRUE)
+  min_ew_sep <- min(correlations_distances$ew_sep, na.rm = TRUE)
+  max_ew_sep <- max(correlations_distances$ew_sep, na.rm = TRUE)
+  
+  # Find the overall min and max
+  min_limit <- min(min_ns_sep, min_ew_sep)
+  max_limit <- max(max_ns_sep, max_ew_sep)
+  
+  # Create the ggplot with two subplots
+  plot1 <- ggplot(correlations_distances, aes(x = distance, y = correlation, color = ns_sep)) +
+    geom_point(alpha = 0.3) +
+    geom_smooth(method = "lm", se = FALSE) +
+    geom_smooth(method = "nls", formula = y ~ a * exp(-b * x), se = FALSE, linetype = "dashed", method.args = list(start = c(a = 1, b = 0.01))) +
+    labs(x = "Distance (km)",
+         y = "Correlation",
+         title = "Correlation vs Distance (colored by North-South separation)") +
+    theme_minimal() +
+    scale_color_gradientn(colors = rainbow(7), name = "NS Separation (deg)", limits = c(min_limit, max_limit))
+  
+  plot2 <- ggplot(correlations_distances, aes(x = distance, y = correlation, color = ew_sep)) +
+    geom_point(alpha = 0.3) +
+    geom_smooth(method = "lm", se = FALSE) +
+    geom_smooth(method = "nls", formula = y ~ a * exp(-b * x), se = FALSE, linetype = "dashed", method.args = list(start = c(a = 1, b = 0.01))) +
+    labs(x = "Distance (km)",
+         y = "Correlation",
+         title = "Correlation vs Distance (colored by East-West separation)") +
+    theme_minimal() +
+    scale_color_gradientn(colors = rainbow(7), name = "EW Separation (deg)", limits = c(min_limit, max_limit))
+  
+  # Combine the two subplots into one using the patchwork package
+  (plot1 / plot2) + plot_layout(guides = "collect")
+  
+}
+
+get_corr_matrix <- function(nday_summ){
+  corr_matrix <- nday_summ %>% 
+    pivot_wider(names_from = location, values_from = value) %>% 
+    ungroup() %>% 
+    select(-Period) %>% 
+    cor()
+  return(corr_matrix)
 }

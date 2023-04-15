@@ -22,6 +22,22 @@ all_names_from_traces <- function(all_traces){
   return(all_names)
 }
 
+all_wind_names_from_traces <- function(all_traces){
+  all_names <- all_traces %>% 
+    lapply(str_remove_all, "(?i)_FFP_.*") %>% 
+    lapply(str_remove_all, "(?i)_SAT_.*") %>% 
+    lapply(str_remove_all, "(?i)_CST_.*") %>% 
+    lapply(str_remove_all, "(?i)REZ_[:alpha:][:digit:]_") %>% 
+    lapply(str_remove_all, "_RefYear3012.csv") %>% 
+    lapply(str_remove_all, "[A-Z]\\d_W[A-Z]_") %>% 
+    lapply(str_replace_all, "_", " ") %>% 
+    unlist() %>% 
+    tibble() %>% 
+    unique()
+  colnames(all_names) <- c("location")
+  return(all_names)
+}
+
 add_states_to_location <- function(df, location_state_map) {
   for (location_name in names(location_state_map)) {
     state_name <- location_state_map[[location_name]]
@@ -101,7 +117,7 @@ plot_locations <- function(geocoded_locations){
     )
 }
 
-load_source_df <- function(all_names, all_traces) {
+load_source_df <- function(all_names, all_traces, folder = "solar") {
   all_names_vec <- all_names %>%
     mutate(location = location %>% str_replace_all(" ", "_")) %>% 
     as.list() %>% 
@@ -117,7 +133,7 @@ load_source_df <- function(all_names, all_traces) {
     # Select the longest matching substring
     location_name <- all_names_vec[matching_indices][which.max(nchar(all_names_vec[matching_indices]))]
     
-    filename <- paste0("../AEMO_data/solar/", t)
+    filename <- paste0("../AEMO_data/", folder, "/", t)
     if (!exists("source_df")) {
       source_df <- read_csv(filename, show_col_types = FALSE)
       source_df <- source_df %>% mutate(location = location_name)
@@ -364,6 +380,8 @@ plot_correlation_vs_distance <- function(correlation_distance){
   min_limit <- min(min_ns_sep, min_ew_sep)
   max_limit <- max(max_ns_sep, max_ew_sep)
   
+  min_corr <- min(correlations_distances$correlation) %>% round(digits = 1)
+  
   # Create the ggplot with two subplots
   plot1 <- ggplot(correlations_distances, aes(x = distance, y = correlation, color = ns_sep)) +
     geom_point(alpha = 0.3) +
@@ -373,7 +391,8 @@ plot_correlation_vs_distance <- function(correlation_distance){
          y = "Correlation",
          title = "Correlation vs Distance (colored by North-South separation)") +
     theme_minimal() +
-    scale_color_gradientn(colors = rainbow(7), name = "NS Separation (deg)", limits = c(min_limit, max_limit))
+    scale_color_gradientn(colors = rainbow(7), name = "NS Separation (deg)", limits = c(min_limit, max_limit))+
+    scale_y_continuous(limits = c(min_corr, 1.0), breaks = seq(min_corr, 1.0, by = 0.1))
   
   plot2 <- ggplot(correlations_distances, aes(x = distance, y = correlation, color = ew_sep)) +
     geom_point(alpha = 0.3) +
@@ -383,7 +402,8 @@ plot_correlation_vs_distance <- function(correlation_distance){
          y = "Correlation",
          title = "Correlation vs Distance (colored by East-West separation)") +
     theme_minimal() +
-    scale_color_gradientn(colors = rainbow(7), name = "EW Separation (deg)", limits = c(min_limit, max_limit))
+    scale_color_gradientn(colors = rainbow(7), name = "EW Separation (deg)", limits = c(min_limit, max_limit))+
+    scale_y_continuous(limits = c(min_corr, 1.0), breaks = seq(min_corr, 1.0, by = 0.1))
   
   # Combine the two subplots into one using the patchwork package
   (plot1 / plot2) + plot_layout(guides = "collect")

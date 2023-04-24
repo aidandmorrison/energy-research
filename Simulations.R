@@ -4,11 +4,14 @@ library(gganimate)
 library(magick)
 
 background_power <- 0.25
-peak_power <- 2
-peak_duration <- 320
+peak_power <- 7
+peak_duration <- 3
 day_mins <- 24*60
-central_dinner_start <- 18*60
-dinner_sd <- 320
+central_dinner_start <- 12*60
+dinner_sd <- 120
+
+title_text <- paste("background:", background_power, "peak power:", peak_power, 
+                    "peak duration:", peak_duration, "window sd:", dinner_sd)
 
 # Generate a sequence of minutes for a day
 day_minutes <- seq(0, day_mins - 1, by = 1)
@@ -16,8 +19,9 @@ day_minutes <- seq(0, day_mins - 1, by = 1)
 # Convert the x-axis to hours of the day
 day_hours <- day_minutes / 60
 
+example_cumulation <- 15
 # Sample 5 displacement values from the normal distribution
-displacements <- rnorm(15, mean = 0, sd = dinner_sd)
+displacements <- rnorm(example_cumulation, mean = 0, sd = dinner_sd)
 
 # Calculate the peak start time for each household
 household_peak_starts <- central_dinner_start + displacements
@@ -62,7 +66,7 @@ individual_demands_plot <- ggplot(household_demands_long, aes(x = day_hours, y =
   geom_line() +
   labs(x = "Hours of the Day",
        y = "Power Demand (kW)",
-       title = "Power Demand for 5 Households",
+       title = paste("Power Demand for", example_cumulation, "Households"),
        color = "Household") +
   theme_minimal()
 
@@ -162,7 +166,8 @@ demands_summary_long <- demands_summary %>%
 
 demands_summary_long %>% 
   ggplot(aes(x = as.factor(group), y = value, fill = key))+
-  geom_bar(position = "fill", stat = "identity")
+  geom_bar(position = "fill", stat = "identity")+
+  ggtitle("Composition of Maximum Possible Power Demand")
 
 # Create the animated plot
 demand_summary_plot <- demands_summary_long %>% 
@@ -174,6 +179,8 @@ demand_summary_plot <- demands_summary_long %>%
   transition_states(group, transition_length = 4, state_length = 1) +
   view_follow(fixed_x = TRUE)
 animate(demand_summary_plot, renderer = gifski_renderer(), fps = 20, duration = 5)
+
+
 
 # Create the animated plot
 followed_demands_animation <- ggplot(all_total_demands, aes(x = day_hours, y = total_power_demand, group = group)) +
@@ -201,9 +208,9 @@ unfollowed <- unfollowed_demands_animation %>%
 
 a_mgif <- image_read(followed)
 b_mgif <- image_read(unfollowed)
-
+add_frames_length <- length(b_mgif)
 new_gif <- image_append(c(a_mgif[1], b_mgif[1]))
-for(i in 2:15){
+for(i in 2:add_frames_length){
   combined <- image_append(c(a_mgif[i], b_mgif[i]))
   new_gif <- c(new_gif, combined)
 }
@@ -211,7 +218,7 @@ for(i in 2:15){
 new_gif
 
 
-anim_save("total_demands_animation.gif", total_demands_animation)
+anim_save("appliances.gif", new_gif)
 
 
 

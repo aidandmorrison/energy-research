@@ -61,7 +61,7 @@ remove_states_from_location <- function(df, location_state_map) {
 }
 
 filter_on_location_cut_list <- function(df, cut_list){
-  for(c in manual_cut_list){
+  for(c in cut_list){
     df <- df %>% 
       filter(!(location %>% str_detect(c)))
   }

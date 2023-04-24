@@ -60,11 +60,14 @@ corr_scaled %>% raw_correlation_plot()
 day_summ <- get_day_summ(long_df)
 
 
-plot_normalised_output_distributions(day_summ, c(1,2,3,4,5))
+plot_normalised_output_distributions(day_summ, c(1,3,5))
 ########
 
 # Use the function to plot the correlation with n = 2
 plot_correlation(day_summ, 1)
+plot_correlation(day_summ, 2)
+plot_correlation(day_summ, 3)
+plot_correlation(day_summ, 4)
 plot_correlation(day_summ, 5)
 #### linear model correlation investigation -----
 

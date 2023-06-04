@@ -522,18 +522,32 @@ process_generator <- function(data, battery_half_hours, dispatch_target) {
       prev_battery_charge <- 0
     }
     
-    if (value >= dispatch_target) {
-      dispatched[i] <- dispatch_target
-      charge_flow[i] <- value - dispatch_target
-      battery_charge[i] <- min((prev_battery_charge * battery_half_hours + charge_flow[i]) / battery_half_hours, 1)
-      spillage[i] <- max(charge_flow[i] - (battery_charge[i] * battery_half_hours - prev_battery_charge * battery_half_hours), 0)
+    if (battery_half_hours == 0) {
+      # if battery_half_hours is zero, there's no battery to charge
+      battery_charge[i] <- 0
+      charge_flow[i] <- 0
+      
+      # Calculate dispatched based on dispatch_target and available value
+      dispatched[i] <- min(value, dispatch_target)
+      
+      # Spillage is any generation that exceeds the dispatch_target
+      spillage[i] <- max(0, value - dispatch_target)
     } else {
-      charge_flow[i] <- min(dispatch_target - value, prev_battery_charge * battery_half_hours)
-      battery_charge[i] <- max((prev_battery_charge * battery_half_hours - charge_flow[i]) / battery_half_hours, 0)
-      dispatched[i] <- value + charge_flow[i]
-      charge_flow[i] <- -charge_flow[i]  # Make the charge_flow negative when the battery is discharging
-      spillage[i] <- 0
+      # existing calculations here
+      if (value >= dispatch_target) {
+        dispatched[i] <- dispatch_target
+        charge_flow[i] <- value - dispatch_target
+        battery_charge[i] <- min((prev_battery_charge * battery_half_hours + charge_flow[i]) / battery_half_hours, 1)
+        spillage[i] <- max(charge_flow[i] - (battery_charge[i] * battery_half_hours - prev_battery_charge * battery_half_hours), 0)
+      } else {
+        charge_flow[i] <- min(dispatch_target - value, prev_battery_charge * battery_half_hours)
+        battery_charge[i] <- max((prev_battery_charge * battery_half_hours - charge_flow[i]) / battery_half_hours, 0)
+        dispatched[i] <- value + charge_flow[i]
+        charge_flow[i] <- -charge_flow[i]  # Make the charge_flow negative when the battery is discharging
+        spillage[i] <- 0
+      }
     }
+    
     dispatch_fraction[i] <- dispatched[i] / dispatch_target
     shortfall[i] <- (1 - dispatch_fraction[i])
     

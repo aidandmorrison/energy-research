@@ -328,7 +328,7 @@ summary_stats_long %>%
 ### Building multiple stats testing storage and generation effects ------
 
 
-battery_hours_list <- c(2, 4, 6, 8)
+battery_hours_list <- c(0, 1, 2, 3, 4)
 dispatch_target_list <- seq(0.2, 1, 0.2)
 
 stat_sensitivies <- data.frame()
@@ -381,6 +381,22 @@ stat_sens_long %>%
   theme(legend.position = "top")
 
 
+chosen_name <- "Darling Downs"
+chosen_name <- "Port Augusta"
+chosen_name <- "Broken Hill"
+stat_sens_long %>% 
+  filter(location == chosen_name) %>% 
+  filter(key %in% key_stats) %>% 
+  ggplot(aes(x = dispatch_target, y = battery_hours, fill = value))+
+  geom_tile()+
+  geom_text(aes(label = round(value, 5)), size = 3, color = "black") +
+  facet_grid(key ~ resource, scales = "free")+
+  scale_fill_gradientn(colours = rainbow(6))+
+  scale_x_continuous(breaks = dispatch_target_list)+
+  scale_y_continuous(breaks = battery_hours_list)+
+  ggtitle(paste("Dispatch Statistics ", chosen_name))
+
+
 stat_sens_short <- stat_sens_long %>% 
   filter(!((location %in% weird_solar_names) & (resource == "solar"))) %>% 
   select(-location) %>% 
@@ -394,6 +410,55 @@ stat_sens_short %>%
 
 
 #### Doing trio analysis -----
+
+# Dispatch merged from each site (storage NOT pooled)
+
+generator_groups <- long_df %>% 
+  filter(location %in% trio_names) %>% 
+  group_by(resource, location) %>% 
+  group_split()
+
+trio_resource_dispatch_merged <- data.frame()
+for(b in battery_hours_list){
+  for (d in dispatch_target_list){
+    battery_half_hours = b * 2
+    
+    processed_data <- lapply(generator_groups, process_generator, battery_half_hours, d) %>% bind_rows()
+    
+    filler <- processed_data %>% 
+      group_by(location, Year, Month, Day, half_hour) %>% 
+      summarise(value = mean(dispatched)) %>% 
+      mutate(resource = "wind_and_solar_own_storage") %>% 
+      get_dispatch_stats(b, d)
+      
+    trio_resource_dispatch_merged <- trio_resource_dispatch_merged %>% bind_rows(filler)
+  }
+}
+
+spillage_excerpt = stat_sens_long %>% 
+  filter(location %in% trio_names) %>% 
+  filter(key == "spillage") %>% 
+  group_by(location, battery_hours, dispatch_target, key) %>% 
+  summarise(value = mean(value)) %>% 
+  mutate(resource = "wind_and_solar_own_storage")
+
+trio_resource_dispatch_merged_long <- trio_resource_dispatch_merged %>% 
+  gather(key = "key", value = "value", -location, -resource, -battery_hours, -dispatch_target) %>% 
+  filter(key != "spillage") %>% 
+  bind_rows(spillage_excerpt)
+
+trio_resource_dispatch_merged_long %>% 
+  filter(key %in% key_stats) %>% 
+  ggplot(aes(x = dispatch_target, y = battery_hours, fill = value))+
+  geom_tile()+
+  geom_text(aes(label = round(value, 3)), size = 3, color = "black") +
+  facet_grid(key ~ location, scales = "free")+
+  scale_fill_gradientn(colours = rainbow(6))+
+  scale_x_continuous(breaks = dispatch_target_list)+
+  scale_y_continuous(breaks = battery_hours_list)+
+  ggtitle(paste("Dispatch Statistics wind+solar dispatch merged without pooled storage"))
+
+# Resources merged at each site (storage pooled at each site prior to dispatch throttling)
 trio_long_df_resource_merged <- long_df %>% 
   filter(location %in% trio_names) %>% 
   group_by(location, Year, Month, Day, half_hour) %>% 
@@ -413,6 +478,62 @@ for(b in battery_hours_list){
 trio_sens_long <- trio_sensitivies %>% 
   gather(key = "key", value = "value", -location, -resource, -battery_hours, -dispatch_target)
 
+trio_sens_long %>% 
+  filter(key %in% key_stats) %>% 
+  ggplot(aes(x = dispatch_target, y = battery_hours, fill = value))+
+  geom_tile()+
+  geom_text(aes(label = round(value, 3)), size = 3, color = "black") +
+  facet_grid(key ~ location, scales = "free")+
+  scale_fill_gradientn(colours = rainbow(6))+
+  scale_x_continuous(breaks = dispatch_target_list)+
+  scale_y_continuous(breaks = battery_hours_list)+
+  ggtitle(paste("Dispatch Statistics wind+solar merged (pooled storage)"))
+
+
+# Sites merged for dispatch, but storage only pooled at each site
+
+trio_dispatch_merged <- data.frame()
+for(b in battery_hours_list){
+  for (d in dispatch_target_list){
+    battery_half_hours = b * 2
+    
+    processed_data <- lapply(generator_groups, process_generator, battery_half_hours, d) %>% bind_rows()
+    
+    filler <- processed_data %>% 
+      group_by(Year, Month, Day, half_hour) %>% 
+      summarise(value = mean(dispatched)) %>% 
+      mutate(resource = "wind_and_solar") %>% 
+      mutate(location = "Broken Hill - Darling Downs - Port Augusta") %>% 
+      get_dispatch_stats(b, d)
+    
+    trio_dispatch_merged <- trio_dispatch_merged %>% bind_rows(filler)
+  }
+}
+
+spillage_excerpt_combined <- trio_sens_long %>% 
+  filter(key == "spillage") %>% 
+  group_by(key, battery_hours, dispatch_target) %>% 
+  summarise(value = mean(value)) %>% 
+  mutate(location = "Broken Hill - Darling Downs - Port Augusta") %>% 
+  mutate(resource = "wind_and_solar")
+
+trio_dispatch_merged_long <- trio_dispatch_merged %>% 
+  gather(key = "key", value = "value", -location, -resource, -battery_hours, -dispatch_target) %>% 
+  filter(key != "spillage") %>% 
+  bind_rows(spillage_excerpt_combined)
+
+trio_dispatch_merged_long %>% 
+  filter(key %in% key_stats) %>% 
+  ggplot(aes(x = dispatch_target, y = battery_hours, fill = value))+
+  geom_tile()+
+  geom_text(aes(label = round(value, 5)), size = 3, color = "black") +
+  facet_grid(key ~ location, scales = "free")+
+  scale_fill_gradientn(colours = rainbow(6))+
+  scale_x_continuous(breaks = dispatch_target_list)+
+  scale_y_continuous(breaks = battery_hours_list)+
+  ggtitle(paste("Dispatch Statistics all generators dispatch merged, storage pooled locally"))
+
+# All generators (resources at all three sites) all pooled storage
 trio_long_df_all_merged <- long_df %>% 
   filter(location %in% trio_names) %>% 
   group_by(Year, Month, Day, half_hour) %>% 
@@ -420,9 +541,6 @@ trio_long_df_all_merged <- long_df %>%
   mutate(resource = "All six generators merged") %>% 
   mutate(location = "Broken Hill - Darling Downs - Port Augusta")
 
-
-dispatch_target_list <- seq(0.1, 0.8, 0.05)
-# dispatch_target_list <- seq(0.2, 1, 0.2)
 trio_merged_sensitivies <- data.frame()
 for(b in battery_hours_list){
   for(d in dispatch_target_list){
@@ -434,10 +552,7 @@ for(b in battery_hours_list){
 trio_merged_long <- trio_merged_sensitivies %>% 
   gather(key = "key", value = "value", -location, -resource, -battery_hours, -dispatch_target)
 
-# stat_sens_short %>% 
-# chosen_name <- "Darling Downs"
 trio_merged_long %>% 
-  # filter(location == chosen_name) %>% 
   filter(key %in% key_stats) %>% 
   ggplot(aes(x = dispatch_target, y = battery_hours, fill = value))+
   geom_tile()+
@@ -447,6 +562,12 @@ trio_merged_long %>%
   scale_x_continuous(breaks = dispatch_target_list)+
   scale_y_continuous(breaks = battery_hours_list)+
   ggtitle(paste("Dispatch Statistics all generators merged"))
+
+
+trio_merged_long %>% 
+  filter(key == "time_falling_short") %>% 
+  ggplot(aes(x = dispatch_target, y = value, col = as.factor(battery_hours)))+
+  geom_line()
 
 
 #### A plot just to insepct a single location closely

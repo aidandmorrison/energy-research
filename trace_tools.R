@@ -7,6 +7,9 @@ library(rnaturalearthdata)
 library(corrplot)
 library(patchwork)
 library(ggrepel)
+library(parallel)
+library(foreach)
+library(doParallel)
 
 all_names_from_traces <- function(all_traces){
   all_names <- all_traces %>% 
@@ -417,4 +420,131 @@ get_corr_matrix <- function(nday_summ){
     select(-Period) %>% 
     cor()
   return(corr_matrix)
+}
+
+# Function to find the closest solar location to a given wind location
+find_closest_solar <- function(wind_lat, wind_lon, solar_df) {
+  solar_df <- solar_df %>%
+    mutate(distance = haversine_distance(wind_lat, wind_lon, lat, long))
+  
+  closest_solar <- solar_df %>%
+    filter(distance == min(distance))
+  
+  return(closest_solar)
+}
+
+correlation_of_pairs <- function(paired_data, geocoded_locations){
+  pairs_corr <- data.frame()
+  
+  for (p in geocoded_locations$pair %>% unique()){
+    solar_location <- geocoded_locations %>%
+      filter(resource == "solar", pair == p) %>%
+      select(location) %>%
+      as.character()
+    
+    wind_location <- geocoded_locations %>%
+      filter(resource == "wind", pair == p) %>%
+      select(location) %>%
+      as.character()
+    
+    
+    
+    w <- paired_data %>% 
+      filter(resource == "wind") %>% 
+      filter(pair == p)
+    print(wind_location)
+    wn <- w %>% nrow()
+    print(wn)
+    
+    s <- paired_data %>% 
+      filter(resource == "solar") %>% 
+      filter(pair == p) 
+    print(solar_location)
+    sn = s %>% nrow()
+    print(sn)
+    
+    if (wn == sn){
+      c <- cor(w$value, s$value)
+      
+      pairs_corr <- rbind(pairs_corr, data.frame(pair = p, 
+                                                 solar_location = solar_location,
+                                                 wind_location = wind_location,
+                                                 correlation = c))
+      print(pairs_corr %>% tail(1))
+    }
+  }
+  return(pairs_corr)
+}
+
+get_dispatch_stats <- function(long_df, battery_hours, dispatch_target){
+  # Set battery_half_hours and dispatch_target
+  battery_half_hours <- battery_hours * 2 
+  
+  # Split the data frame by location
+  generator_groups <- long_df %>% group_by(resource, location) %>% group_split()
+  
+  # Apply the function to each group and bind the results back together
+  processed_data <- lapply(generator_groups, process_generator, battery_half_hours, dispatch_target) %>% bind_rows()
+  
+  # Step 1: Calculate mean spillage and mean dispatch_fraction
+  summary_stats <- processed_data %>%
+    mutate(at_zero = case_when(dispatch_fraction == 0 ~ 1, TRUE ~ 0),
+           fell_short = case_when(dispatch_fraction < 1 ~ 1, TRUE ~ 0)) %>% 
+    group_by(location, resource) %>%
+    summarise(spillage = mean(spillage, na.rm = TRUE),
+              dispatch_fraction = mean(dispatch_fraction, na.rm = TRUE),
+              shortfall = mean(shortfall, na.rm = TRUE),
+              time_at_zero = mean(at_zero, na.rm = TRUE),
+              time_falling_short = mean(fell_short, na.rm = TRUE)) %>% 
+    mutate(battery_hours = battery_hours,
+           dispatch_target = dispatch_target)
+  print(paste(" battery: ", battery_hours, "dispatch target:", dispatch_target))
+  return (summary_stats)
+  
+}
+
+
+process_generator <- function(data, battery_half_hours, dispatch_target) {
+  n <- nrow(data)
+  
+  dispatched <- numeric(n)
+  charge_flow <- numeric(n)
+  spillage <- numeric(n)
+  dispatch_fraction <- numeric(n)
+  battery_charge <- numeric(n)
+  shortfall <- numeric(n)
+  
+  for (i in 1:n) {
+    value <- data$value[i]
+    if (i > 1) {
+      prev_battery_charge <- battery_charge[i - 1]
+    } else {
+      prev_battery_charge <- 0
+    }
+    
+    if (value >= dispatch_target) {
+      dispatched[i] <- dispatch_target
+      charge_flow[i] <- value - dispatch_target
+      battery_charge[i] <- min((prev_battery_charge * battery_half_hours + charge_flow[i]) / battery_half_hours, 1)
+      spillage[i] <- max(charge_flow[i] - (battery_charge[i] * battery_half_hours - prev_battery_charge * battery_half_hours), 0)
+    } else {
+      charge_flow[i] <- min(dispatch_target - value, prev_battery_charge * battery_half_hours)
+      battery_charge[i] <- max((prev_battery_charge * battery_half_hours - charge_flow[i]) / battery_half_hours, 0)
+      dispatched[i] <- value + charge_flow[i]
+      charge_flow[i] <- -charge_flow[i]  # Make the charge_flow negative when the battery is discharging
+      spillage[i] <- 0
+    }
+    dispatch_fraction[i] <- dispatched[i] / dispatch_target
+    shortfall[i] <- (1 - dispatch_fraction[i])
+    
+  }
+  
+  data$dispatched <- dispatched
+  data$charge_flow <- charge_flow
+  data$spillage <- spillage
+  data$dispatch_fraction <- dispatch_fraction
+  data$battery_charge <- battery_charge
+  data$shortfall <- shortfall
+  # print(paste("Processed", data$location %>% head(1), data$resource %>% head(1)))
+  return(data)
 }
